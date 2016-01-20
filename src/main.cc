@@ -1,5 +1,11 @@
-#include "snake.h"
 
+#include <iostream>
+#include <stdlib.h>
+#include <ncurses.h>
+#include <time.h>
+#include <signal.h>
+#include <vector>
+#include "snake.h"
 //inline void display(char gsDomain[][22], int level, int moveSpeed)
 //{
 //  system("cls"); //清屏
@@ -36,20 +42,15 @@ class Snake {
 
 
 
-int main()
-{
+int main() {
+
   initscr();
   cbreak();
   noecho();
   keypad(stdscr, true);
   nodelay(stdscr, true);
-  int nlines = 20;
-  int ncols = 20;
-  int y0 = 10, x0 = 10;
-  wmove(stdscr, y0, x0);
   wrefresh(stdscr);
   signal(SIGWINCH, resizeHandler);
-
 
   wborder(stdscr, 0, 0, 0, 0, 0, 0, 0, 0);
 
@@ -58,15 +59,15 @@ int main()
     if ((ch = getch()) == ERR) {
       // wait for a while
       // generate next state
-      generateNextState();
+      //generateNextState();
       // refresh
       wrefresh(stdscr);
     } else {
       switch(ch) {
         case KEY_UP: break;
         case KEY_DOWN: break;
-        case KEY_LEFT: printf(ch); flag = false; break;
-        case KEY_RIGHT:  break;
+        case KEY_LEFT: printf("%d", ch); flag = false; break;
+        case KEY_RIGHT: printf("%d",ch); break;
         default: break;
       }
     }
