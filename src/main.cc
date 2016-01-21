@@ -1,220 +1,180 @@
-
 #include <iostream>
 #include <stdlib.h>
 #include <ncurses.h>
 #include <time.h>
 #include <signal.h>
 #include <vector>
+#include <thread>
+#include <chrono>
+#include <mutex>
 #include "snake.h"
-//inline void display(char gsDomain[][22], int level, int moveSpeed)
-//{
-//  system("cls"); //清屏
-//  cout << endl << endl;
-//  for (int i = 0; i < 22; i++)
-//      {
-//    cout << "\t";
-//    for (int j = 0; j < 22; j++)
-//      cout << gsDomain[i][j] << " ";
-//    if (i == 0)
-//        {
-//      cout << "\tLevel：" << level;
-//        }
-//    else if (i == 3)
-//        {
-//      cout << "\t自动前进时间";
-//        }
-//    else if (i == 5)
-//        {
-//      cout << "\t间隔：" << moveSpeed << " ms";
-//        }
-//
-//    cout << endl;
-//      }
-//}
 
 void resizeHandler (int sig) {
   int nh, nw;
   getmaxyx(stdscr, nh, nw);
 }
 
-class Snake {
-};
+class Playground {
+ public:
+  Playground() {
+    initscr();
+    start_color();
+    init_pair(1, COLOR_RED, COLOR_WHITE);
+    left_bound_ = 0;
+    up_bound_ = 0;
+    
+    int h,w;
+    getmaxyx(stdscr, h, w);
+    down_bound_ = h - 1;
+    right_bound_ = w - 1;
+    game_over_ = true;
+    
+    window_ = stdscr;
 
+    cbreak();
+    //halfdelay(1);
 
+    keypad(window_, TRUE);
+    wrefresh(window_);
+    wmove(window_, 1, 1);
+  }
+ 
+//  Playground(int left_bound, int up_bound, int nlines, int ncols) {
+//    initscr();
+//    left_bound_ = left_bound;
+//    up_bound_ = up_bound;
+//    right_bound_ = left_bound + ncols;
+//    down_bound_ = up_bound + nlines;
+//
+//    wborder(window_, 0, 0, 0, 0, 0, 0, 0, 0);
+//    cbreak();
+//    noecho();
+//    keypad(window_, true);
+//    nodelay(window_, true);
+//    wrefresh(window_);
+////    signal(SIGWINCH, resizeHandler);
+//  }
 
-int main() {
+  void Welcome() {
+    wmove(window_, center().y - 1, center().x - 15);
+    printw("Welcome to play My Simple Snake!\n");
+    wmove(window_, center().y, center().x - 15);
+    printw("Press any key to start. Enjoy yourself!\n");
+    wmove(window_, center().y+1, center().x - 15);
+    printw("COLORS:%d, COLOR_PAIRS:%d", COLORS, COLOR_PAIRS);    
+    wgetch(window_);
+    wmove(window_, 1, 1);
+  }
 
-  initscr();
-  cbreak();
-  noecho();
-  keypad(stdscr, true);
-  nodelay(stdscr, true);
-  wrefresh(stdscr);
-  signal(SIGWINCH, resizeHandler);
+  void Clear() {
+    noecho();
+    wclear(window_);
+    wrefresh(window_);
+    wborder(window_, 0, 0, 0, 0, 0, 0, 0, 0);
+  }
 
-  wborder(stdscr, 0, 0, 0, 0, 0, 0, 0, 0);
+  bool DrawSnake(const Snake& snake) {
+    // This mutex avoid conflict between addch and getch.
+    // Comment mutexs below and in thread keyboard_listen,
+    // you may see the strange bug.
+    print_get_mutex_.lock();
+	mvwaddch(window_, snake.head().y, snake.head().x, ' ' | COLOR_PAIR(1));
+    mvwaddch(window_, snake.prev_tail().y, snake.prev_tail().x, ' ');
+    print_get_mutex_.unlock();
 
-  int ch;
-  for (bool flag = true; flag ;) {
-    if ((ch = getch()) == ERR) {
-      // wait for a while
-      // generate next state
-      //generateNextState();
-      // refresh
-      wrefresh(stdscr);
+    wmove(window_, down_bound_, 0);
+    wrefresh(window_);
+    if (snake.head().x == left_bound_ || snake.head().x == right_bound_
+        || snake.head().y == up_bound_ || snake.head().y == down_bound_) {
+      return true; // Yes, game over.
     } else {
-      switch(ch) {
-        case KEY_UP: break;
-        case KEY_DOWN: break;
-        case KEY_LEFT: printf("%d", ch); flag = false; break;
-        case KEY_RIGHT: printf("%d",ch); break;
-        default: break;
-      }
+      return false;
     }
   }
 
+  bool GameOver() {
+    wmove(window_, 5, center().x - 10);
+    printw("Game Over :) Play again? [y/N]?");
+    nodelay(window_, FALSE);
+    int ch = wgetch(window_);
+    return ch == 'y'; 
+  }
+  
+  Position center() {
+    return {(left_bound_ + right_bound_) / 2,
+            (up_bound_ + down_bound_) / 2};
+  }
+
+  void RunSingleSnake() {
+    nodelay(window_, TRUE);
+    snake_.SetHead(center());
+    game_over_ = false;
+    wmove(window_, down_bound_, 0);
+    printw("  You may press <q> to stop game at anytime.");
+
+    std::thread keyboard_listen([this] () {
+      int ch;
+      while (!game_over_) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // This mutex avoid conflict between addch and getch.
+        // Comment mutexs below and in DrawSnake, you may see 
+        // the strange bug.
+        print_get_mutex_.lock();
+        ch = getch();
+        print_get_mutex_.unlock();
+
+        if (ch != ERR) {
+  	      Directions direction = kNoChange;
+          switch(ch) {
+            case KEY_UP: direction = kUp; break;
+            case KEY_DOWN: direction = kDown; break;
+            case KEY_LEFT: direction = kLeft; break;
+            case KEY_RIGHT: direction = kRight; break;
+            case 'q': game_over_ = true; break;
+            default:
+              mvwaddch(window_, up_bound_, left_bound_, ch);
+          }
+  	      snake_.setDirection(direction);
+        }
+      }
+    });
+    
+    while (!game_over_) {
+      // wait for a while
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      if (game_over_) break;
+      // generate next state.
+  	  snake_.Move();
+  	  game_over_ = DrawSnake(snake_);
+    }
+    keyboard_listen.join();
+  }
   
 
-//  char gsDomain[22][22]; //贪吃蛇活动区域(包括墙壁)
-//  //初始化贪吃蛇活动区域(不包括墙壁)
-//  for (int i = 1; i <= 21; i++)
-//      {
-//    for (int j = 1; j <= 21; j++)
-//      gsDomain[i][j] = ' ';
-//      }
-//  //初始化贪吃蛇活动区域的上下墙壁
-//  for (int i = 0; i < 22; i++)
-//    gsDomain[0][i] = gsDomain[21][i] = '-';
-//  //初始化贪吃蛇活动区域的左右墙壁
-//  for (int i = 1; i < 21; i++)
-//    gsDomain[i][0] = gsDomain[i][21] = '|';
-//  //初始化蛇身
-//  for (int i = 1; i <= 3; i++)
-//    gsDomain[1][i] = '*';
-//  //初始化蛇头
-//  gsDomain[1][4] = '#';
-//
-//  int snake[2][100]; //记录贪吃蛇每次出现的位置的坐标
-//  for (int i = 0; i < 4; i++)
-//      {
-//    snake[0][i] = 1; //记录贪吃蛇所在位置的x坐标
-//    snake[1][i] = i + 1; //记录贪吃蛇所在位置的y坐标
-//      }
-//  int head = 3, tail = 0, length = 4;
-//
-//  int beanX, beanY; //豆豆出现的位置
-//  srand(time(0));
-//  do
-//      {
-//    beanX = rand() % 20 + 1;
-//    beanY = rand() % 20 + 1;
-//      } while (gsDomain[beanX][beanY] != ' ');
-//  gsDomain[beanX][beanY] = '*'; //豆豆
-//
-//  cout << "\n\n\t\t贪吃蛇游戏即将开始!\n";
-//  long start;
-//  int level = 1, moveSpeed = 1000;
-//  for (int i = 3; i >= 0; i--)
-//      {
-//    start = clock();
-//    while (clock() - start <= 1000){}
-//    system("cls");
-//    if (i)
-//        {
-//      cout << "\n\n\t\t进入游戏倒计时：" << i << endl;
-//        }
-//    else
-//      display(gsDomain, level, moveSpeed);
-//      }
-//
-//  char direction = 77; //贪吃蛇默认自动向右直线前进
-//  while (true)
-//      {
-//    bool timeFlag = true;
-//    int x, y;
-//    start = clock();
-//
-//    //若时间超过自动前进时间或者键盘上有键按下则终止循环
-//    while ((timeFlag = (clock() - start <= moveSpeed))){}
-//
-//    if (timeFlag)
-//        {
-//      //键盘上有键按下时读取键盘输入
-//      getch();
-//      direction = getch();
-//        }
-//
-//    switch (direction)
-//          {
-//          //向上
-//            case 72: x = snake[0][head] - 1, y = snake[1][head];
-//          break;
-//          //向下
-//            case 80: x = snake[0][head] + 1, y = snake[1][head];
-//          break;
-//          //向左
-//            case 75: x = snake[0][head], y = snake[1][head] - 1;
-//          break;
-//          //向右
-//            case 77: x = snake[0][head], y = snake[1][head] + 1;
-//          break;
-//            default: cout << "\tGame Over!\n";
-//          return 0;
-//          }
-//
-//    if (x == 0 || x == 21 || y == 0 || y == 21)
-//        {
-//      //贪吃蛇触碰到墙壁
-//      cout << "\tGame Over!\n";
-//      return 0;
-//        }
-//
-//    if (gsDomain[x][y] != ' ' && !(x == beanX && y == beanY))
-//        {
-//      //贪吃蛇的蛇头触碰到蛇身或者蛇尾
-//      cout << "\tGame Over!\n";
-//      return 0;
-//        }
-//
-//    if (x == beanX && y == beanY)
-//        {
-//      //吃豆豆
-//      length++; //长度加1
-//      if (length >= 8)
-//          {
-//        //游戏升级处理
-//        length -= 8;
-//        level++;
-//        if (moveSpeed > 100)
-//          moveSpeed -= 100;
-//          }
-//      gsDomain[snake[0][head]][snake[1][head]] = '*';
-//      gsDomain[x][y] = '#';
-//      head = (head + 1) % 100;
-//      snake[0][head] = x;
-//      snake[1][head] = y;
-//      do
-//          {
-//        beanX = rand() % 20 + 1;
-//        beanY = rand() % 20 + 1;
-//          } while (gsDomain[beanX][beanY] != ' ');
-//      gsDomain[beanX][beanY] = '*';
-//      
-//      display(gsDomain, level, moveSpeed); //屏幕上显示
-//        }
-//    else
-//        {
-//      //不吃豆豆
-//      gsDomain[snake[0][tail]][snake[1][tail]] = ' '; //蛇尾前移一格
-//      tail = (tail + 1) % 100;
-//      gsDomain[snake[0][head]][snake[1][head]] = '*';
-//      head = (head + 1) % 100;
-//      snake[0][head] = x;
-//      snake[1][head] = y;
-//      gsDomain[x][y] = '#'; //蛇头前移一格
-//      display(gsDomain, level, moveSpeed); //屏幕上显示
-//        }
-//      }
+ private:
+  Snake snake_;
+  int up_bound_;
+  int down_bound_;
+  int left_bound_;
+  int right_bound_;
+  bool game_over_;
+  WINDOW* window_;
+  std::mutex print_get_mutex_; // make printw and getch mutex.
+};
+
+  
+int main() {
+  Playground playground;
+
+
+  playground.Welcome();
+
+  for (bool play_again = true; play_again; ) {
+    playground.Clear();
+    playground.RunSingleSnake();
+    play_again = playground.GameOver();
+  }
+
   endwin();
   return 0;
 }
